@@ -13,8 +13,8 @@ captions_file = "results.csv"
 # Constants
 IMAGE_HEIGHT = 224
 IMAGE_WIDTH = 224
-BATCH_SIZE = 32
-CAPTION_LENGTH = 25
+BATCH_SIZE = 64
+CAPTION_LENGTH = 10
 
 # Image preprocessing and normalization
 image_transform = transforms.Compose([
