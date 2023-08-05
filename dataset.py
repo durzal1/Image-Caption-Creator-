@@ -37,10 +37,10 @@ class ImageCaptionDataset(Dataset):
 
         # Get Data
         for ind in range(0,num_rows):
-            # if ind == 19999:
-            #     continue
-            # if ind == 1000:
-            #     break
+
+            # In order to train faster we're only using the first 20000 values
+            if ind == 20000:
+                break
 
             # only get every 5th image
             if ind % 5 == 0:
@@ -59,7 +59,7 @@ class ImageCaptionDataset(Dataset):
 
             data.append(self.tokenizer(comment))
 
-        self.vocab = build_vocab_from_iterator(data, specials= ["<PAD>", "<UNK>", "<SOS>", "<EOS>"], min_freq=5)
+        self.vocab = build_vocab_from_iterator(data, specials= ["<PAD>", "<UNK>", "<SOS>", "<EOS>"], min_freq=1)
 
     def __len__(self):
         return len(self.image_names)
@@ -79,9 +79,16 @@ class ImageCaptionDataset(Dataset):
             tokens = self.tokenizer(caption)
 
             # Create the numerical representation
-            numerical_representation = torch.tensor([self.vocab[token] for token in tokens])
+            numerical_representation = []
 
-            numerical_representation = numerical_representation.squeeze(0)
+            for token in tokens:
+                if token not in self.vocab:
+                    numerical_representation.append(self.vocab["<UNK>"])
+                else:
+                    numerical_representation.append(self.vocab[token])
+            numerical_tensor = torch.tensor(numerical_representation)
+
+            numerical_representation = numerical_tensor.squeeze(0)
 
             # Compute the padding amount
             padding_amount = max(0, self.caption_length - numerical_representation.size(0))
@@ -94,7 +101,7 @@ class ImageCaptionDataset(Dataset):
             padded_representation = F.pad(numerical_representation, padding, value=0)
 
 
-            caption_tensor[i] = padded_representation
+            caption_tensor[i] = padded_representation[:self.caption_length]
 
         specific_image_path = os.path.join(self.image_path, image)
         image = Image.open(specific_image_path).convert("RGB")
