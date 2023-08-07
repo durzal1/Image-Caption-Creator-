@@ -23,8 +23,7 @@ class ImageCaptionDataset(Dataset):
         self.SetUpCaptions()
 
     def SetUpCaptions(self):
-        captions = pd.read_csv("results.csv", sep="|")
-
+        captions = pd.read_csv(self.caption_file, sep="|")
         num_rows, num_columns = captions.shape
 
         # All the data we need
@@ -38,8 +37,8 @@ class ImageCaptionDataset(Dataset):
         # Get Data
         for ind in range(0,num_rows):
 
-            # In order to train faster we're only using the first 20000 values
-            if ind == 20000:
+            # In order to train faster we're only using the first 80000 values
+            if ind == 80000:
                 break
 
             # only get every 5th image
@@ -48,18 +47,25 @@ class ImageCaptionDataset(Dataset):
                 self.image_names.append(image_name)
 
             comment_number = captions.loc[ind," comment_number"]
-            comment = captions.loc[ind," comment"]
+            if (self.caption_file == "test2.csv"):
+                comment = captions.loc[ind," comment,,,"]
+            else:
+                comment = captions.loc[ind," comment"]
 
-            # Broken index for some reason
+            # Broken indices for some reason
             if ind == 19999:
                 comment = "a dog runs across the grass"
+
+            if ind == 402 and num_rows == 420:
+                comment_number = 2
+                comment = "People outside"
 
             self.comment_numbers.append(comment_number)
             self.comments.append(comment)
 
             data.append(self.tokenizer(comment))
 
-        self.vocab = build_vocab_from_iterator(data, specials= ["<PAD>", "<UNK>", "<SOS>", "<EOS>"], min_freq=1)
+        self.vocab = build_vocab_from_iterator(data, specials= ["<PAD>", "<UNK>", "<SOS>", "<EOS>"], min_freq=8)
 
     def __len__(self):
         return len(self.image_names)
@@ -79,13 +85,15 @@ class ImageCaptionDataset(Dataset):
             tokens = self.tokenizer(caption)
 
             # Create the numerical representation
-            numerical_representation = []
+            numerical_representation = [self.vocab["<SOS>"]]
 
             for token in tokens:
                 if token not in self.vocab:
                     numerical_representation.append(self.vocab["<UNK>"])
                 else:
                     numerical_representation.append(self.vocab[token])
+
+            numerical_representation.append(self.vocab["<EOS>"])
             numerical_tensor = torch.tensor(numerical_representation)
 
             numerical_representation = numerical_tensor.squeeze(0)
