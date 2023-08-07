@@ -9,9 +9,9 @@ import torch.nn as nn
 import torchvision.models as models
 
 # Directory for images and captions (From flickr30k dataset)
-images_dir = "flickr30k_images/"
-test_dir = "test_images/"
-captions_file = "results.csv"
+images_dir = "images/"
+test_dir = "flickr30k_images/"
+captions_file = "captions.txt"
 captions_test = "test2.csv"
 
 # Constants
@@ -20,12 +20,12 @@ IMAGE_HEIGHT = 224
 IMAGE_WIDTH = 224
 NUM_LAYERS = 2
 CLIP = 5
-HIDDEN_SIZE = 512
-EMBEDDING_SIZE = 512
+HIDDEN_SIZE = 256
+EMBEDDING_SIZE = 256
 BATCH_SIZE = 32
 CAPTION_LENGTH = 15
-NUM_EPOCHS = 70
-LEARNING_RATE = 0.0001
+NUM_EPOCHS = 100
+LEARNING_RATE = 0.0003
 
 # Image preprocessing and normalization
 image_transform = transforms.Compose([
@@ -38,13 +38,13 @@ image_transform = transforms.Compose([
 
 # Load the Flickr30k dataset
 dataset_train = ImageCaptionDataset(images_dir, captions_file, CAPTION_LENGTH, transform=image_transform)
-dataset_test = ImageCaptionDataset(images_dir, captions_test, CAPTION_LENGTH, transform=image_transform)
+# dataset_test = ImageCaptionDataset(images_dir, captions_test, CAPTION_LENGTH, transform=image_transform)
 vocab_size = len(dataset_train.vocab)
-dataset_test.vocab = dataset_train.vocab
+# dataset_test.vocab = dataset_train.vocab
 
 # Prepare the DataLoaders
 train_loader = DataLoader(dataset_train, batch_size=BATCH_SIZE, shuffle=True)
-validation_loader = DataLoader(dataset_test, batch_size=BATCH_SIZE, shuffle=True)
+# validation_loader = DataLoader(dataset_test, batch_size=BATCH_SIZE, shuffle=True)
 
 class Decoder(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers=1):
@@ -63,38 +63,16 @@ class Decoder(nn.Module):
         # captions: Ground truth captions for teacher forcing (batch_size, number_captions, caption_length)
 
         # Remove EOS
-        input_captions = captions[:, :, :-1]
-
-        batch_size = captions.shape[0]
+        input_captions = captions[:, :-1]
 
         # Embed the input captions
         embedded_captions = self.dropout(self.embedding(input_captions))
 
-        # Initialize the hidden state and cell state of the LSTM
-        hidden = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(features.device)
-        cell = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(features.device)
-
         features = features.unsqueeze(1)
 
-        # Combine features with each embedded caption and pass through LSTM
-        lstm_outputs_list = []
-        for i in range(self.num_captions):
-            lstm_input = torch.cat((features, embedded_captions[:, i, :]), dim=1)
-            lstm_output, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
-            # lstm_output = lstm_output[:, :-1, :] # Remove the last time step (corresponds to the feature vector)
-            lstm_outputs_list.append(lstm_output)
-
-        # Combine LSTM outputs for all captions
-        lstm_outputs = torch.cat(lstm_outputs_list, dim=1)
-
-        # Flatten so we can put it into the FC layer
-        lstm_outputs = lstm_outputs.contiguous().view(-1, self.hidden_dim)
-
-        # Final output prediction at each time step
-        outputs = self.fc(lstm_outputs)
-
-        # Output shape -> (Batch, 5, caption_length, vocab_size)
-        outputs = outputs.view(batch_size, 5, CAPTION_LENGTH, self.vocab_size)
+        embeddings = torch.cat((features, embedded_captions), dim=1)
+        hiddens, _ = self.lstm(embeddings)
+        outputs = self.fc(hiddens)
 
         return outputs
 
@@ -117,6 +95,9 @@ class Encoder(nn.Module):
         # Add a linear layer to project the output to the desired output size (embedding dimension)
         self.fc = nn.Linear(resnet.fc.in_features, output_size)
 
+        self.dropout = nn.Dropout(0.5)
+
+
     def forward(self, x):
         # x shape (batch_size, 3, IMAGE_HEIGHT, IMAGE_WIDTH) -> image
 
@@ -130,7 +111,7 @@ class Encoder(nn.Module):
         features = features.view(features.size(0), -1)
 
         # Project to the desired output size (embedding dimension)
-        features = self.fc(features)
+        features = self.dropout(self.fc(features))
 
         return features
 
@@ -327,7 +308,7 @@ def imagine(images, captions_predicted, captions_correct):
 model = Image2Words(EMBEDDING_SIZE, HIDDEN_SIZE, vocab_size, NUM_LAYERS)
 model.to(DEVICE)
 
-model.load_state_dict(torch.load("updated2.pth"))
+# model.load_state_dict(torch.load("updated2.pth"))
 
 # criterion and optimizer for training
 criterion = nn.CrossEntropyLoss(ignore_index=dataset_train.vocab["<PAD>"])
@@ -342,55 +323,55 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 
 
 # training
-# for epoch in range(NUM_EPOCHS):
-#     total_loss = 0
-#     model.train()
-#
-#     loop = tqdm(train_loader, leave=True)
-#
-#     for batch, (x, y) in enumerate(loop):
-#         x, y = x.to(DEVICE), y.to(DEVICE)
-#
-#         # forward prop
-#         out = model(x,y)
-#
-#         # Flatten both out and y in order to work
-#         out = out.view(-1, vocab_size)
-#         y = y.view(-1)
-#
-#         y = y.long()
-#
-#         # loss function
-#         loss = criterion(out, y)
-#
-#         optimizer.zero_grad()
-#         loss.backward()
-#
-#         # Help prevent exploding gradient problem
-#         nn.utils.clip_grad_norm_(model.parameters(), CLIP)
-#
-#         # update gradients
-#         optimizer.step()
-#
-#         # accumulate loss
-#         total_loss += loss.item()
-#
-#         if batch == 499:
-#
-#             # use only 1 image in the batch for ease
-#             x_test = x[1, :, :].unsqueeze(0)
-#
-#             # Generate captions for the images
-#             generated_captions = model.beam_search(x_test)
-#
-#             print(generated_captions)
-#
-#             model.train()
-#
-#
-#     average_loss = total_loss / len(train_loader)
-#     print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Loss: {average_loss:.4f}")
-#
+for epoch in range(NUM_EPOCHS):
+    total_loss = 0
+    model.train()
+
+    loop = tqdm(train_loader, leave=True)
+
+    for batch, (x, y) in enumerate(loop):
+        x, y = x.to(DEVICE), y.to(DEVICE)
+
+        # forward prop
+        out = model(x,y)
+
+        # Flatten both out and y in order to work
+        out = out.view(-1, vocab_size)
+        y = y.view(-1)
+
+        y = y.long()
+
+        # loss function
+        loss = criterion(out, y)
+
+        optimizer.zero_grad()
+        loss.backward()
+
+        # Help prevent exploding gradient problem
+        nn.utils.clip_grad_norm_(model.parameters(), CLIP)
+
+        # update gradients
+        optimizer.step()
+
+        # accumulate loss
+        total_loss += loss.item()
+
+        if batch % 4 == 0:
+
+            # use only 1 image in the batch for ease
+            x_test = x[1, :, :].unsqueeze(0)
+
+            # Generate captions for the images
+            generated_captions = model.beam_search(x_test)
+
+            print(generated_captions)
+
+            model.train()
+
+
+    average_loss = total_loss / len(train_loader)
+    print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Loss: {average_loss:.4f}")
+
 #
 #     # Validation
 #
@@ -429,26 +410,26 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 #     print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Validation Loss: {average_val_loss:.4f}")
 
 # Testing
-with torch.no_grad():
-    for batch, (x_test, y_test) in enumerate(validation_loader):
-        x_test = x_test.to(DEVICE)
-
-        # use only 1 image in the batch for ease
-        x_test = x_test[1, :, :].unsqueeze(0)
-        y_test = y_test[1, :, :].unsqueeze(0)
-
-
-        # Generate captions for the images
-        generated_captions = model.beam_search(x_test)
-
-        # Correct captions for the images
-        correct_captions = model.convertWordsY(y_test)
-
-        print(generated_captions)
-        print(correct_captions)
-
-        # Plot everything
-        imagine(x_test, generated_captions, correct_captions)
+# with torch.no_grad():
+#     for batch, (x_test, y_test) in enumerate(validation_loader):
+#         x_test = x_test.to(DEVICE)
+#
+#         # use only 1 image in the batch for ease
+#         x_test = x_test[1, :, :].unsqueeze(0)
+#         y_test = y_test[1, :, :].unsqueeze(0)
+#
+#
+#         # Generate captions for the images
+#         generated_captions = model.beam_search(x_test)
+#
+#         # Correct captions for the images
+#         correct_captions = model.convertWordsY(y_test)
+#
+#         print(generated_captions)
+#         print(correct_captions)
+#
+#         # Plot everything
+#         imagine(x_test, generated_captions, correct_captions)
 
 # Save the trained model if desired
-torch.save(model.state_dict(), "updated2.pth")
+torch.save(model.state_dict(), "updated4.pth")
