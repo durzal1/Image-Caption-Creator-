@@ -24,7 +24,7 @@ HIDDEN_SIZE = 256
 EMBEDDING_SIZE = 256
 BATCH_SIZE = 32
 CAPTION_LENGTH = 15
-NUM_EPOCHS = 100
+NUM_EPOCHS = 70
 LEARNING_RATE = 0.0003
 
 # Image preprocessing and normalization
@@ -151,7 +151,6 @@ class Image2Words(nn.Module):
             hidden = torch.zeros(model.decoder.num_layers, BATCH_SIZE, model.decoder.hidden_dim).to(DEVICE)
             cell = torch.zeros(model.decoder.num_layers, BATCH_SIZE, model.decoder.hidden_dim).to(DEVICE)
 
-            states = (hidden,cell)
             features = model.encoder(images)
 
             states = None
@@ -192,9 +191,6 @@ class Image2Words(nn.Module):
             for _ in range(max_length):
                 candidates = []
                 for score, sequence, states in sequences:
-                    # Prepare the inputs for the decoder LSTM
-                    input_word = sequence[-1].unsqueeze(0)
-
                     # Perform a forward pass through the LSTM
                     output, new_states = self.decoder.lstm(features, states)
 
@@ -216,7 +212,7 @@ class Image2Words(nn.Module):
                         if (val == "<SOS>"):
                             continue
 
-                        new_score = score + top_log_probs[0, i].item()
+                        new_score = score - top_log_probs[0, i].item()
 
                         # Check if we're at the end
                         if word == dataset_train.vocab["<EOS>"]:
@@ -227,11 +223,11 @@ class Image2Words(nn.Module):
                             candidates.append((new_score, new_sequence, new_states))
 
                 # Select the top beam_width sequences
-                sequences = heapq.nlargest(beam_width, candidates, key=lambda x: x[0])
+                sequences = heapq.nsmallest(beam_width, candidates, key=lambda x: x[0])
 
 
             # Get the best sequence
-            best_sequence = sequences[9][1]
+            best_sequence = sequences[0][1]
 
             # Convert the word indices to words
             predicted_words = self.convertWords(torch.tensor(best_sequence, dtype=torch.long).unsqueeze(0))
@@ -256,11 +252,9 @@ class Image2Words(nn.Module):
         # Convert word indices to words for each caption in the batch
         batch_words = []
         for batch_idx in range(words.size(0)):
-            caption_words = []
-            for caption_idx in range(words.size(1)):
-                caption = [id_to_word[word_idx.item()] for word_idx in words[batch_idx, caption_idx]]
-                caption_words.append(caption)
-            batch_words.append(caption_words)
+            caption = [id_to_word[word_idx.item()] for word_idx in words[batch_idx]]
+
+            batch_words.append(caption)
 
         return batch_words
 # Makes a visual representation of everything
@@ -274,7 +268,6 @@ def imagine(images, captions_predicted, captions_correct):
     assert images.shape == (3, 224, 224), "Invalid shape for images"
     assert isinstance(captions_predicted[0], str), "captions_predicted should be a list of strings"
     assert len(captions_correct) == 1, "Invalid size for captions_correct"
-    assert len(captions_correct[0]) == 5, "Invalid size for captions_correct[0]"
 
     # Create a new figure
     plt.figure(figsize=(8, 8))
@@ -288,12 +281,13 @@ def imagine(images, captions_predicted, captions_correct):
 
     # Create a sentence from the predicted captions and plot it
     predicted_sentence = " ".join(captions_predicted)
-    plt.title("Predicted Caption:\n" + predicted_sentence, fontsize=10)
+    plt.title("Predicted Caption:\n" + predicted_sentence, fontsize=12)
 
     # Create a sentence from the correct captions and plot it
-    correct_sentences = [" ".join(caption) for caption in captions_correct[0]]
-    correct_caption_str = "\n".join(correct_sentences)
-    plt.text(0, 250, "Correct Captions:\n" + correct_caption_str, fontsize=10)
+    caption_correct = captions_correct[0]
+    correct_caption_str = " ".join(caption_correct)
+
+    plt.text(0, 250, "Correct Captions:\n" + correct_caption_str, fontsize=12)
 
     # Show the plot
     plt.tight_layout()
@@ -308,7 +302,7 @@ def imagine(images, captions_predicted, captions_correct):
 model = Image2Words(EMBEDDING_SIZE, HIDDEN_SIZE, vocab_size, NUM_LAYERS)
 model.to(DEVICE)
 
-# model.load_state_dict(torch.load("updated2.pth"))
+model.load_state_dict(torch.load("updated4.pth"))
 
 # criterion and optimizer for training
 criterion = nn.CrossEntropyLoss(ignore_index=dataset_train.vocab["<PAD>"])
@@ -323,54 +317,54 @@ print(f'The model has {count_parameters(model):,} trainable parameters')
 
 
 # training
-for epoch in range(NUM_EPOCHS):
-    total_loss = 0
-    model.train()
-
-    loop = tqdm(train_loader, leave=True)
-
-    for batch, (x, y) in enumerate(loop):
-        x, y = x.to(DEVICE), y.to(DEVICE)
-
-        # forward prop
-        out = model(x,y)
-
-        # Flatten both out and y in order to work
-        out = out.view(-1, vocab_size)
-        y = y.view(-1)
-
-        y = y.long()
-
-        # loss function
-        loss = criterion(out, y)
-
-        optimizer.zero_grad()
-        loss.backward()
-
-        # Help prevent exploding gradient problem
-        nn.utils.clip_grad_norm_(model.parameters(), CLIP)
-
-        # update gradients
-        optimizer.step()
-
-        # accumulate loss
-        total_loss += loss.item()
-
-        if batch % 4 == 0:
-
-            # use only 1 image in the batch for ease
-            x_test = x[1, :, :].unsqueeze(0)
-
-            # Generate captions for the images
-            generated_captions = model.beam_search(x_test)
-
-            print(generated_captions)
-
-            model.train()
-
-
-    average_loss = total_loss / len(train_loader)
-    print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Loss: {average_loss:.4f}")
+# for epoch in range(NUM_EPOCHS):
+#     total_loss = 0
+#     model.train()
+#
+#     loop = tqdm(train_loader, leave=True)
+#
+#     for batch, (x, y) in enumerate(loop):
+#         x, y = x.to(DEVICE), y.to(DEVICE)
+#
+#         # forward prop
+#         out = model(x,y)
+#
+#         # Flatten both out and y in order to work
+#         out = out.view(-1, vocab_size)
+#         y = y.view(-1)
+#
+#         y = y.long()
+#
+#         # loss function
+#         loss = criterion(out, y)
+#
+#         optimizer.zero_grad()
+#         loss.backward()
+#
+#         # Help prevent exploding gradient problem
+#         nn.utils.clip_grad_norm_(model.parameters(), CLIP)
+#
+#         # update gradients
+#         optimizer.step()
+#
+#         # accumulate loss
+#         total_loss += loss.item()
+#
+#         if batch == 499:
+#
+#             # use only 1 image in the batch for ease
+#             x_test = x[1, :, :].unsqueeze(0)
+#
+#             # Generate captions for the images
+#             generated_captions = model.beam_search(x_test)
+#
+#             print(generated_captions)
+#
+#             model.train()
+#
+#
+#     average_loss = total_loss / len(train_loader)
+#     print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Loss: {average_loss:.4f}")
 
 #
 #     # Validation
@@ -410,26 +404,25 @@ for epoch in range(NUM_EPOCHS):
 #     print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Validation Loss: {average_val_loss:.4f}")
 
 # Testing
-# with torch.no_grad():
-#     for batch, (x_test, y_test) in enumerate(validation_loader):
-#         x_test = x_test.to(DEVICE)
-#
-#         # use only 1 image in the batch for ease
-#         x_test = x_test[1, :, :].unsqueeze(0)
-#         y_test = y_test[1, :, :].unsqueeze(0)
-#
-#
-#         # Generate captions for the images
-#         generated_captions = model.beam_search(x_test)
-#
-#         # Correct captions for the images
-#         correct_captions = model.convertWordsY(y_test)
-#
-#         print(generated_captions)
-#         print(correct_captions)
-#
-#         # Plot everything
-#         imagine(x_test, generated_captions, correct_captions)
+with torch.no_grad():
+    for batch, (x_test, y_test) in enumerate(train_loader):
+        x_test = x_test.to(DEVICE)
+
+        # use only 1 image in the batch for ease
+        x_test = x_test[1, :, :].unsqueeze(0)
+        y_test = y_test[1, :].unsqueeze(0)
+
+
+        # Generate captions for the images
+        generated_captions = model.beam_search(x_test)
+
+        # Correct captions for the images
+        correct_captions = model.convertWordsY(y_test)
+        print(generated_captions)
+        print(correct_captions)
+
+        # Plot everything
+        imagine(x_test, generated_captions, correct_captions)
 
 # Save the trained model if desired
 torch.save(model.state_dict(), "updated4.pth")
